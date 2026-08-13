@@ -1,0 +1,902 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LEGO Pic</title>
+<meta name="description" content="Turn any photo into a LEGO mosaic — pick a baseplate size and get the brick colors you'd need.">
+<style>
+  /* Same look as the Arcade: rounded system font, soft cards, adapts to
+     light/dark automatically. */
+  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --bg: #f4f6fb;
+    --bg-glow: #dfe7f7;
+    --card: #ffffff;
+    --card-edge: #dde3ee;
+    --ink: #131826;
+    --ink-dim: #5c6577;
+    --accent: #2f6df6;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1220;
+      --bg-glow: #14203a;
+      --card: #151d2e;
+      --card-edge: #26314a;
+      --ink: #eef2fb;
+      --ink-dim: #96a1b8;
+      --accent: #6f9bff;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: clamp(1.5rem, 5vw, 3rem) clamp(1rem, 4vw, 2rem) 4rem;
+    min-height: 100vh;
+    font-family: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    background-image: radial-gradient(120% 80% at 50% -10%, var(--bg-glow) 0%, var(--bg) 60%);
+    background-attachment: fixed;
+  }
+  .wrap { max-width: 56rem; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 2rem; }
+  h1 { margin: 0 0 .4rem; font-size: clamp(1.9rem, 6vw, 2.6rem); letter-spacing: -.02em; }
+  .tagline { margin: 0; color: var(--ink-dim); font-size: clamp(.95rem, 2.5vw, 1.05rem); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-edge);
+    border-radius: 1.1rem;
+    box-shadow: var(--shadow);
+    padding: 1.2rem;
+    margin-bottom: 1.1rem;
+  }
+
+  /* ---- drop zone ------------------------------------------------------ */
+  #drop {
+    border: 2px dashed var(--card-edge);
+    border-radius: 1rem;
+    padding: 2.2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  #drop .big { font-size: 2.4rem; line-height: 1; }
+  #drop .hint { color: var(--ink-dim); font-size: .88rem; margin-top: .5rem; }
+  #drop strong { color: var(--accent); }
+
+  /* ---- live camera ----------------------------------------------------- */
+  .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .row.center { justify-content: center; }
+  video {
+    display: block; width: 100%;
+    aspect-ratio: 4 / 3; object-fit: cover;
+    border-radius: .8rem; background: #000;
+  }
+  .msg { color: var(--ink-dim); font-size: .88rem; text-align: center; margin: .8rem 0 0; line-height: 1.5; }
+  .msg.warn { color: #b4690e; }
+  @media (prefers-color-scheme: dark) { .msg.warn { color: #e8b25f; } }
+  [hidden] { display: none !important; }
+
+  /* ---- controls ------------------------------------------------------- */
+  .controls { display: flex; flex-wrap: wrap; gap: 1.2rem; align-items: center; }
+  .group { display: flex; align-items: center; gap: .5rem; }
+  .group > .lbl { font-size: .82rem; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
+  button {
+    font: inherit;
+    font-size: .92rem;
+    padding: .45rem .85rem;
+    border-radius: .7rem;
+    border: 1px solid var(--card-edge);
+    background: var(--bg);
+    color: var(--ink);
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  label.check { display: flex; align-items: center; gap: .4rem; font-size: .92rem; cursor: pointer; }
+
+  /* ---- mosaic --------------------------------------------------------- */
+  #out { display: block; width: 100%; height: auto; border-radius: .8rem; image-rendering: auto; }
+  #stage { display: none; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: 1.6rem; margin-bottom: .9rem; }
+  .stat .n { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; }
+  .stat .k { font-size: .8rem; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .06em; }
+
+  /* Parts list — one row per LEGO color used, most-used first. */
+  .parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .45rem; }
+  .part { display: flex; align-items: center; gap: .6rem; font-size: .88rem; }
+  .swatch {
+    width: 1.15rem; height: 1.15rem; border-radius: 50%;
+    border: 1px solid rgba(128,128,128,.45); flex: none;
+  }
+  .part .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .part .ct { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+  footer { text-align: center; color: var(--ink-dim); font-size: .85rem; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>🧱 LEGO Pic</h1>
+    <p class="tagline">Drop in a photo — get it back as LEGO bricks.</p>
+  </header>
+
+  <!-- Step 1: get a picture in — camera, click, drag-and-drop, or paste. -->
+  <div class="card" id="intake">
+    <div id="drop">
+      <div class="big">🖼️</div>
+      <div><strong>Choose a photo</strong> or drag one here</div>
+      <div class="hint">You can also just paste one (⌘V). Nothing gets uploaded — it all happens on this page.</div>
+    </div>
+    <div class="row center" style="margin-top:.9rem">
+      <button id="useCam" class="primary">📷 Take one with the camera</button>
+    </div>
+    <p class="msg" id="camMsg" hidden></p>
+    <input type="file" id="file" accept="image/*" hidden>
+  </div>
+
+  <!-- The live camera. Only on screen while you're actually shooting, so the
+       camera isn't held open the whole time you're fiddling with the mosaic. -->
+  <div class="card" id="camera" hidden>
+    <video id="video" playsinline muted></video>
+    <div class="row center" style="margin-top:.9rem">
+      <button id="snap" class="primary" disabled>📸 Take the picture</button>
+      <button id="closeCam">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Step 2: the result. Hidden until there's actually a picture loaded. -->
+  <div id="stage">
+    <div class="card">
+      <div class="controls">
+        <div class="group">
+          <span class="lbl">Studs</span>
+          <!-- How many studs to build the whole thing out of. 1000 is a
+               good default: enough detail to recognise a face, few enough
+               to still look like bricks rather than pixels. -->
+          <button data-total="100">100</button>
+          <button data-total="500">500</button>
+          <button data-total="1000" class="on">1000</button>
+          <button data-total="2500">2500</button>
+          <button data-total="5000">5000</button>
+        </div>
+        <div class="group">
+          <label class="check"><input type="checkbox" id="studs" checked> Show studs</label>
+        </div>
+        <div class="group">
+          <!-- On by default: zoom in on whatever the photo is actually of,
+               so the subject fills the whole mosaic instead of sitting in the
+               middle of a lot of table. Uncheck to use the full photo. -->
+          <label class="check"><input type="checkbox" id="crop" checked> Just the subject</label>
+        </div>
+        <div class="group" style="margin-left:auto">
+          <!-- Draw a shape on the mosaic: what's inside stays, everything
+               outside comes off the plate. -->
+          <button id="erase">🧽 Delete studs</button>
+          <button id="shapeRect" class="on" hidden>▢ Box</button>
+          <button id="shapeCircle" hidden>◯ Circle</button>
+          <button id="unerase" hidden>Put them all back</button>
+        </div>
+        <div class="group" style="margin-left:auto">
+          <button id="save" class="primary">Save as image</button>
+          <button id="again">New photo</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <canvas id="out"></canvas>
+      <p class="msg" id="hint" hidden>Drag a shape over the part you want to keep — everything outside it comes off the plate.</p>
+    </div>
+
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><div class="n" id="nBricks">—</div><div class="k">Bricks</div></div>
+        <div class="stat"><div class="n" id="nColors">—</div><div class="k">Colors</div></div>
+        <div class="stat"><div class="n" id="nPlate">—</div><div class="k">Studs</div></div>
+      </div>
+      <div class="parts" id="parts"></div>
+    </div>
+  </div>
+
+  <footer>Made with real LEGO colors · works offline</footer>
+
+</div>
+
+<script>
+"use strict";
+
+/* ===================================================================== *
+ * The LEGO palette
+ * ---------------------------------------------------------------------
+ * These are the hex values of real LEGO brick colors, so the mosaic uses
+ * shades you could actually buy rather than arbitrary RGB. Trimming or
+ * adding entries here directly changes what the converter can use.
+ * ===================================================================== */
+const PALETTE = [
+  ["White",              "#f2f3f2"],
+  ["Very Light Gray",    "#e6e3da"],
+  ["Light Bluish Gray",  "#a0a5a9"],
+  ["Dark Bluish Gray",   "#6c6e68"],
+  ["Black",              "#05131d"],
+  ["Red",                "#c91a09"],
+  ["Dark Red",           "#720e0f"],
+  ["Orange",             "#fe8a18"],
+  ["Dark Orange",        "#a95500"],
+  ["Yellow",             "#f2cd37"],
+  ["Bright Light Yellow","#fff03a"],
+  ["Lime",               "#bbe90b"],
+  ["Bright Green",       "#4b9f4a"],
+  ["Green",              "#237841"],
+  ["Dark Green",         "#184632"],
+  ["Sand Green",         "#a0bcac"],
+  ["Dark Turquoise",     "#008f9b"],
+  ["Medium Blue",        "#5a93db"],
+  ["Bright Light Blue",  "#9fc3e9"],
+  ["Blue",               "#0055bf"],
+  ["Dark Blue",          "#0a3463"],
+  ["Medium Lavender",    "#ac78ba"],
+  ["Purple",             "#81007b"],
+  ["Magenta",            "#923978"],
+  ["Pink",               "#fc97ac"],
+  ["Nougat",             "#d09168"],
+  ["Medium Nougat",      "#aa7d55"],
+  ["Tan",                "#e4cd9e"],
+  ["Dark Tan",           "#958a73"],
+  ["Reddish Brown",      "#5f3109"],
+  ["Brown",              "#582a12"],
+];
+
+/* Turn "#c91a09" into [201, 26, 9]. */
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/* ---------------------------------------------------------------------
+ * Color matching happens in CIE Lab, not RGB.
+ *
+ * In RGB, "distance between two colors" doesn't match what the eye sees —
+ * greens are over-weighted and dark shades bunch together, so photos come
+ * out muddy. Lab is built so that equal distances look like equal
+ * differences, which makes the nearest-brick pick look right.
+ * ------------------------------------------------------------------- */
+function rgbToLab(r, g, b) {
+  // 1. sRGB (0-255) -> linear RGB, undoing the display gamma curve.
+  const lin = (c) => {
+    c /= 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  r = lin(r); g = lin(g); b = lin(b);
+
+  // 2. Linear RGB -> XYZ (D65 white point).
+  const x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
+  const y = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 1.00000;
+  const z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
+
+  // 3. XYZ -> Lab.
+  const f = (t) => t > 0.008856 ? Math.cbrt(t) : (7.787 * t) + 16 / 116;
+  const fx = f(x), fy = f(y), fz = f(z);
+  return [(116 * fy) - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+// Precompute each brick color once, so matching every stud is just math.
+const BRICKS = PALETTE.map(([name, hex]) => {
+  const rgb = hexToRgb(hex);
+  return { name, hex, rgb, lab: rgbToLab(rgb[0], rgb[1], rgb[2]) };
+});
+
+/* Find the LEGO color closest to one pixel. Plain squared distance in Lab —
+   no need for the square root, since we only compare distances. */
+function nearestBrick(r, g, b) {
+  const [L, A, B2] = rgbToLab(r, g, b);
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < BRICKS.length; i++) {
+    const lab = BRICKS[i].lab;
+    const dL = L - lab[0], dA = A - lab[1], dB = B2 - lab[2];
+    const d = dL * dL + dA * dA + dB * dB;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+/* ===================================================================== *
+ * State + elements
+ * ===================================================================== */
+const $ = (id) => document.getElementById(id);
+const dropEl = $("drop"), fileEl = $("file"), stageEl = $("stage");
+const outEl = $("out"), partsEl = $("parts"), studsEl = $("studs");
+
+let sourceImg = null;   // the loaded photo, kept so we can re-render on any change
+let cropRect = null;    // where the subject is in it — worked out once per photo
+
+/* How many studs the whole mosaic is made of. The grid it turns into
+   depends on the photo's shape, so those are worked out in render(). */
+let totalStuds = 1000;
+let gridW = 0, gridH = 0;
+
+/* ---------------------------------------------------------------------
+ * Deleting studs
+ *
+ * You draw a shape on the mosaic; whatever falls inside it stays, and
+ * everything outside comes off the plate.
+ *
+ * The shape is stored as fractions of the picture (0 to 1) rather than as
+ * a list of studs. That way it survives everything else: switch from 1000
+ * studs to 5000 and the same shape still cuts in the same place, instead
+ * of a saved list of stud positions pointing at the wrong squares.
+ * ------------------------------------------------------------------- */
+let keepShape = "rect";   // "rect" or "circle"
+let keepRegion = null;    // {shape, x0, y0, x1, y1} in fractions, or null for all
+let dragRegion = null;    // the shape being dragged right now, for the preview
+let erasing = false;      // is delete-studs mode switched on?
+let lastIdx = null;       // the colours worked out last render, so a drag can
+                          // redraw without recalculating every stud
+
+/* Is this stud off the plate? Outside the shape means yes. */
+function isErased(x, y) {
+  const region = dragRegion || keepRegion;
+  if (!region) return false;
+
+  // Middle of the stud, as a fraction of the whole picture.
+  const fx = (x + 0.5) / gridW, fy = (y + 0.5) / gridH;
+
+  if (region.shape === "circle") {
+    const cx = (region.x0 + region.x1) / 2, cy = (region.y0 + region.y1) / 2;
+    const rx = Math.abs(region.x1 - region.x0) / 2, ry = Math.abs(region.y1 - region.y0) / 2;
+    if (rx < 1e-6 || ry < 1e-6) return false;
+    const dx = (fx - cx) / rx, dy = (fy - cy) / ry;
+    return dx * dx + dy * dy > 1;
+  }
+  return fx < Math.min(region.x0, region.x1) || fx > Math.max(region.x0, region.x1) ||
+         fy < Math.min(region.y0, region.y1) || fy > Math.max(region.y0, region.y1);
+}
+
+/* ---------------------------------------------------------------------
+ * Getting a picture in
+ *
+ * Four ways in — camera, file picker, drag-and-drop, paste — and they all
+ * funnel into useSource(). render() only ever asks its source for .width,
+ * .height and its pixels, so an <img> and a <canvas> both work here and
+ * the camera path needs no special case downstream.
+ * ------------------------------------------------------------------- */
+function useSource(src) {
+  sourceImg = src;
+  cropRect = subjectCrop(src);  // find the subject once, not on every re-render
+  stopCamera();                 // done shooting — let the camera light go out
+  $("camera").hidden = true;
+  stageEl.style.display = "block";
+  render();
+  stageEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);   // the pixels live in the <img> now
+    useSource(img);
+  };
+  img.src = url;
+}
+
+dropEl.addEventListener("click", () => fileEl.click());
+fileEl.addEventListener("change", (e) => loadFile(e.target.files[0]));
+
+/* ---------------------------------------------------------------------
+ * The live camera
+ * ------------------------------------------------------------------- */
+let stream = null;
+
+async function startCamera() {
+  if (stream) return;                        // already running — don't ask twice
+  $("camera").hidden = false;
+  $("camMsg").hidden = true;
+  try {
+    // Prefer the rear camera on anything that has one; a laptop just gives
+    // us its only camera and ignores the hint.
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1600 } },
+      audio: false,
+    });
+    $("video").srcObject = stream;
+    await $("video").play();
+    $("snap").disabled = false;
+    $("camera").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (err) {
+    // Denied, no camera, or a browser that won't allow it on a file:// page.
+    // Not fatal — dropping and pasting still work, so just say so.
+    $("camera").hidden = true;
+    $("camMsg").hidden = false;
+    $("camMsg").className = "msg warn";
+    $("camMsg").textContent =
+      err && err.name === "NotAllowedError"
+        ? "Camera permission was blocked — allow it in your browser settings, or drop a photo in above."
+        : "No camera available here. Drop a photo in above instead.";
+  }
+}
+
+/* Release the camera as soon as we're finished with it. */
+function stopCamera() {
+  if (stream) {
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+  }
+  $("snap").disabled = true;
+}
+
+$("useCam").addEventListener("click", startCamera);
+$("closeCam").addEventListener("click", () => {
+  stopCamera();
+  $("camera").hidden = true;
+});
+
+$("snap").addEventListener("click", () => {
+  const v = $("video");
+  if (!v.videoWidth) return;                 // stream hasn't delivered a frame yet
+
+  // Freeze the current video frame onto a canvas and hand that straight to
+  // the converter — no need to encode it to a file first.
+  const shot = document.createElement("canvas");
+  shot.width = v.videoWidth;
+  shot.height = v.videoHeight;
+  shot.getContext("2d").drawImage(v, 0, 0);
+  useSource(shot);
+});
+
+// Never leave the camera running in a tab you've navigated away from.
+window.addEventListener("pagehide", stopCamera);
+
+// Drag and drop. dragover must be cancelled or the browser just opens the file.
+dropEl.addEventListener("dragover", (e) => { e.preventDefault(); dropEl.classList.add("over"); });
+dropEl.addEventListener("dragleave", () => dropEl.classList.remove("over"));
+dropEl.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dropEl.classList.remove("over");
+  loadFile(e.dataTransfer.files[0]);
+});
+
+// Paste a picture straight from the clipboard.
+window.addEventListener("paste", (e) => {
+  for (const item of e.clipboardData.items) {
+    if (item.type.startsWith("image/")) { loadFile(item.getAsFile()); break; }
+  }
+});
+
+/* ===================================================================== *
+ * Finding what the photo is actually of
+ * ---------------------------------------------------------------------
+ * Photos have a subject and a lot of nothing around it — table, carpet,
+ * wall. At 32 studs across, that wasted margin is the difference between a
+ * recognisable mosaic and a beige blob with something small in the middle.
+ *
+ * So before converting, work out where the interesting part is. Two things
+ * make a pixel interesting:
+ *
+ *   1. it doesn't look like the background (sampled from the edges, since
+ *      whatever is touching all four borders is almost certainly not the
+ *      subject), and
+ *   2. it sits in a busy area — detail and edges, rather than a flat
+ *      expanse of one colour.
+ *
+ * Add those into a score per pixel, collapse the scores down onto each
+ * axis, and the subject shows up as a hump in the middle of the profile.
+ * The crop is where that hump rises and falls.
+ * ===================================================================== */
+function subjectCrop(img) {
+  const SW = 160;                                  // work small — this is only ever a rough box
+  const SH = Math.max(1, Math.round(SW * (img.height / img.width)));
+  const c = document.createElement("canvas");
+  c.width = SW; c.height = SH;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, SW, SH);
+  const d = ctx.getImageData(0, 0, SW, SH).data;
+
+  const at = (x, y) => (y * SW + x) * 4;
+
+  // --- 1. what does the background look like? Average a thin frame around
+  // the outside of the photo.
+  let br = 0, bg = 0, bb = 0, bn = 0;
+  const band = Math.max(2, Math.round(SW * 0.04));
+  for (let y = 0; y < SH; y++) {
+    for (let x = 0; x < SW; x++) {
+      const edge = x < band || y < band || x >= SW - band || y >= SH - band;
+      if (!edge) continue;
+      const p = at(x, y);
+      br += d[p]; bg += d[p + 1]; bb += d[p + 2]; bn++;
+    }
+  }
+  br /= bn; bg /= bn; bb /= bn;
+
+  // --- 2. score every pixel, and total those scores up per row and column.
+  const colE = new Float32Array(SW);
+  const rowE = new Float32Array(SH);
+  for (let y = 1; y < SH - 1; y++) {
+    for (let x = 1; x < SW - 1; x++) {
+      const p = at(x, y);
+      const r = d[p], g = d[p + 1], b = d[p + 2];
+
+      // How far from the background colour.
+      const bgDist = Math.hypot(r - br, g - bg, b - bb) / 441;   // 441 = max possible
+
+      // How busy it is here: brightness difference against the pixels either
+      // side, horizontally and vertically. Flat areas score ~0.
+      const lum = (px) => (d[px] * 0.299 + d[px + 1] * 0.587 + d[px + 2] * 0.114);
+      const gx = Math.abs(lum(at(x + 1, y)) - lum(at(x - 1, y)));
+      const gy = Math.abs(lum(at(x, y + 1)) - lum(at(x, y - 1)));
+      const detail = Math.min(1, (gx + gy) / 160);
+
+      const score = bgDist + detail * 1.4;         // detail weighted a little higher
+      colE[x] += score;
+      rowE[y] += score;
+    }
+  }
+
+  /* Smooth a profile, then return where it first and last rises above a
+     share of its peak. Smoothing matters: without it a single bright speck
+     of glare in the corner drags the crop out to the edge. */
+  function bounds(profile, n) {
+    const sm = new Float32Array(n);
+    const R = Math.max(1, Math.round(n * 0.03));   // smoothing window
+    for (let i = 0; i < n; i++) {
+      let sum = 0, cnt = 0;
+      for (let k = -R; k <= R; k++) {
+        const j = i + k;
+        if (j >= 0 && j < n) { sum += profile[j]; cnt++; }
+      }
+      sm[i] = sum / cnt;
+    }
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) { if (sm[i] < lo) lo = sm[i]; if (sm[i] > hi) hi = sm[i]; }
+    if (hi - lo < 1e-6) return [0, n - 1];         // completely flat photo — keep all of it
+    const cut = lo + (hi - lo) * 0.28;             // the "this is subject" line
+    let a = 0, z = n - 1;
+    while (a < n && sm[a] < cut) a++;
+    while (z > a && sm[z] < cut) z--;
+    return [a, z];
+  }
+
+  let [x0, x1] = bounds(colE, SW);
+  let [y0, y1] = bounds(rowE, SH);
+
+  // A little air around it, so the subject isn't cut flush to its own edge.
+  const padX = (x1 - x0) * 0.06, padY = (y1 - y0) * 0.06;
+  x0 = Math.max(0, x0 - padX); x1 = Math.min(SW - 1, x1 + padX);
+  y0 = Math.max(0, y0 - padY); y1 = Math.min(SH - 1, y1 + padY);
+
+  // If the "subject" came out tiny, the detection almost certainly misfired
+  // (glare, a very busy background). Fall back to the whole photo rather
+  // than confidently cropping to nothing.
+  const wFrac = (x1 - x0) / SW, hFrac = (y1 - y0) / SH;
+  if (wFrac < 0.18 || hFrac < 0.18) return { x: 0, y: 0, w: img.width, h: img.height };
+
+  // Scale the box back up to the real photo's pixels.
+  const sx = img.width / SW, sy = img.height / SH;
+  return {
+    x: Math.round(x0 * sx),
+    y: Math.round(y0 * sy),
+    w: Math.max(1, Math.round((x1 - x0) * sx)),
+    h: Math.max(1, Math.round((y1 - y0) * sy)),
+  };
+}
+
+/* ---------------------------------------------------------------------
+ * The conversion itself
+ * ------------------------------------------------------------------- */
+function render() {
+  if (!sourceImg) return;
+
+  // Either the subject's box or the whole photo, depending on the toggle.
+  // Everything below works off this rectangle, so the mosaic always fills
+  // the output edge to edge — no letterboxing, no wasted studs.
+  const crop = $("crop").checked && cropRect
+    ? cropRect
+    : { x: 0, y: 0, w: sourceImg.width, h: sourceImg.height };
+
+  /* Turn "1000 studs" into a grid. For a picture A times wider than it is
+     tall, N studs split into about sqrt(N*A) columns, which keeps the studs
+     square. Rounding means the total lands near N rather than exactly on
+     it — 1000 might come out as 36 x 28, which is 1008. */
+  const aspect = crop.w / crop.h;
+  gridW = Math.max(2, Math.round(Math.sqrt(totalStuds * aspect)));
+  gridH = Math.max(2, Math.round(totalStuds / gridW));
+
+  // Step 1 — shrink the photo down to exactly one pixel per stud.
+  // The browser's own downscaling averages the pixels for us, which is
+  // what we want: each stud should reflect its whole area, not one
+  // arbitrary pixel poking through.
+  const small = document.createElement("canvas");
+  small.width = gridW;
+  small.height = gridH;
+  const sctx = small.getContext("2d", { willReadFrequently: true });
+  sctx.imageSmoothingEnabled = true;
+  sctx.imageSmoothingQuality = "high";
+  sctx.drawImage(sourceImg, crop.x, crop.y, crop.w, crop.h, 0, 0, gridW, gridH);
+  const px = sctx.getImageData(0, 0, gridW, gridH).data;
+
+  // Step 2 — snap every one of those pixels to its closest LEGO color,
+  // counting how many of each we end up needing.
+  const idx = new Uint8Array(gridW * gridH);   // brick index per stud
+  const counts = new Array(BRICKS.length).fill(0);
+  let used = 0;
+  for (let i = 0; i < gridW * gridH; i++) {
+    const p = i * 4;
+    const b = nearestBrick(px[p], px[p + 1], px[p + 2]);
+    idx[i] = b;
+    // A deleted stud still gets a colour worked out (so putting it back is
+    // instant) but it isn't a brick you'd have to buy, so it's left out of
+    // the count.
+    if (isErased(i % gridW, Math.floor(i / gridW))) continue;
+    counts[b]++;
+    used++;
+  }
+
+  lastIdx = idx;                               // kept for the drag preview
+  drawMosaic(idx, gridW, gridH);
+  showParts(counts, used);
+}
+
+/* Draw the studs. Sized so the mosaic is crisp on any screen, then scaled
+   down to fit by CSS. */
+function drawMosaic(idx, w, h) {
+  const STUD = 22;                                  // pixels per stud
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const ctx = outEl.getContext("2d");
+
+  outEl.width = w * STUD * dpr;
+  outEl.height = h * STUD * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const showStuds = studsEl.checked;
+  const r = STUD * 0.30;                            // stud radius
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const brick = BRICKS[idx[y * w + x]];
+      const px = x * STUD, py = y * STUD;
+
+      /* Erased: draw the bare baseplate instead of a brick — a flat grey
+         square with a dark socket, which is what you'd actually be looking
+         at with the brick lifted off. */
+      if (isErased(x, y)) {
+        ctx.fillStyle = "#4a4f57";
+        ctx.fillRect(px, py, STUD, STUD);
+        ctx.beginPath();
+        ctx.arc(px + STUD / 2, py + STUD / 2, r, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,.35)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,.20)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px + .5, py + .5, STUD - 1, STUD - 1);
+        continue;
+      }
+
+      // The flat top of the brick.
+      ctx.fillStyle = brick.hex;
+      ctx.fillRect(px, py, STUD, STUD);
+
+      if (!showStuds) continue;
+
+      // The round stud on top. Rather than picking a second color per
+      // brick, we draw the same color and lay translucent white/black over
+      // it — so every color gets a matching highlight and shadow for free.
+      const cx = px + STUD / 2, cy = py + STUD / 2;
+
+      ctx.beginPath();                              // soft shadow under it
+      ctx.arc(cx, cy + 1, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,.22)";
+      ctx.fill();
+
+      ctx.beginPath();                              // the stud face
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = brick.hex;
+      ctx.fill();
+
+      ctx.beginPath();                              // light catching the top edge
+      ctx.arc(cx, cy, r, Math.PI * 1.15, Math.PI * 1.95);
+      ctx.strokeStyle = "rgba(255,255,255,.35)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Thin seam so neighbouring bricks of the same color stay visible.
+      ctx.strokeStyle = "rgba(0,0,0,.10)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + .5, py + .5, STUD - 1, STUD - 1);
+    }
+  }
+}
+
+/* The shopping list: which colors, and how many of each. */
+function showParts(counts, total) {
+  // Pair each count with its brick, drop unused colors, biggest first.
+  const used = counts
+    .map((n, i) => ({ n, brick: BRICKS[i] }))
+    .filter((row) => row.n > 0)
+    .sort((a, b) => b.n - a.n);
+
+  // "Bricks" is what you'd actually need — deleted studs aren't counted.
+  // The plate is the full grid, whether or not every stud is filled.
+  $("nBricks").textContent = total.toLocaleString();
+  $("nColors").textContent = used.length;
+  $("nPlate").textContent = gridW + " × " + gridH;
+
+  partsEl.innerHTML = "";
+  for (const { n, brick } of used) {
+    const row = document.createElement("div");
+    row.className = "part";
+    row.innerHTML =
+      '<span class="swatch" style="background:' + brick.hex + '"></span>' +
+      '<span class="nm"></span><span class="ct"></span>';
+    row.querySelector(".nm").textContent = brick.name;
+    row.querySelector(".ct").textContent = n.toLocaleString();
+    partsEl.appendChild(row);
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * Controls
+ * ------------------------------------------------------------------- */
+document.querySelectorAll("[data-total]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("[data-total]").forEach((b) => b.classList.remove("on"));
+    btn.classList.add("on");
+    totalStuds = +btn.dataset.total;
+    render();
+  });
+});
+
+studsEl.addEventListener("change", render);
+$("crop").addEventListener("change", render);
+
+/* ---------------------------------------------------------------------
+ * Drawing the keep-shape
+ * ------------------------------------------------------------------- */
+
+/* Where a pointer is, as a fraction of the picture. Uses the on-screen
+   size rather than the canvas's own pixel size, since the two differ —
+   the canvas is drawn big and scaled down to fit by CSS. */
+function pointFrac(e) {
+  const r = outEl.getBoundingClientRect();
+  return {
+    x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+    y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+  };
+}
+
+/* Redraw during a drag. Only the drawing is redone, not the colour
+   matching — that's what lastIdx is for — so it keeps up even at 5000
+   studs. Then the shape's outline goes on top so you can see what you're
+   about to keep. */
+function previewDrag() {
+  if (!lastIdx) return;
+  drawMosaic(lastIdx, gridW, gridH);
+
+  const ctx = outEl.getContext("2d");
+  const W = outEl.width, H = outEl.height;
+  const x0 = dragRegion.x0 * W, y0 = dragRegion.y0 * H;
+  const x1 = dragRegion.x1 * W, y1 = dragRegion.y1 * H;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);          // outline in raw canvas pixels
+  ctx.strokeStyle = "rgba(255,255,255,.95)";
+  ctx.lineWidth = Math.max(2, W / 300);
+  ctx.setLineDash([ctx.lineWidth * 3, ctx.lineWidth * 2]);
+  ctx.beginPath();
+  if (dragRegion.shape === "circle") {
+    ctx.ellipse((x0 + x1) / 2, (y0 + y1) / 2,
+                Math.abs(x1 - x0) / 2, Math.abs(y1 - y0) / 2, 0, 0, Math.PI * 2);
+  } else {
+    ctx.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* The drag itself. Pointer events rather than mouse or touch ones, because
+   the same three handlers then cover a mouse, a trackpad and a finger. */
+let dragging = false;
+
+outEl.addEventListener("pointerdown", (e) => {
+  if (!erasing) return;                        // ignore clicks when not deleting
+  const p = pointFrac(e);
+  dragging = true;
+  // Corner one and corner two both start at the same spot; the move handler
+  // drags the second one around.
+  dragRegion = { shape: keepShape, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+  // Capture keeps the drag alive even if the pointer leaves the canvas, so
+  // letting go outside it still finishes the shape instead of stranding it.
+  outEl.setPointerCapture(e.pointerId);
+  // Stops the browser starting its own image-drag on the canvas instead.
+  e.preventDefault();
+});
+
+outEl.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const p = pointFrac(e);
+  dragRegion.x1 = p.x;
+  dragRegion.y1 = p.y;
+  previewDrag();                               // show the cut as it's made
+});
+
+outEl.addEventListener("pointerup", () => {
+  if (!dragging) return;
+  dragging = false;
+
+  // A tap rather than a drag means no shape — treat it as a miss and leave
+  // the mosaic alone, instead of deleting every stud on the plate.
+  const big = Math.abs(dragRegion.x1 - dragRegion.x0) > 0.02 &&
+              Math.abs(dragRegion.y1 - dragRegion.y0) > 0.02;
+  keepRegion = big ? dragRegion : keepRegion;  // a miss leaves the old shape be
+  dragRegion = null;
+
+  $("unerase").hidden = !keepRegion;
+  // Full render rather than just a redraw: the parts list has to be counted
+  // again now that a different set of studs is on the plate.
+  render();
+});
+
+/* Switch delete-studs mode on and off. The shape buttons only appear while
+   it's on — there's nothing to choose otherwise. */
+function setErasing(on) {
+  erasing = on;
+  $("erase").classList.toggle("on", on);
+  $("erase").textContent = on ? "🧽 Done deleting" : "🧽 Delete studs";
+  $("shapeRect").hidden = !on;
+  $("shapeCircle").hidden = !on;
+  $("unerase").hidden = !keepRegion;
+  outEl.style.cursor = on ? "crosshair" : "";
+  $("hint").hidden = !on;
+}
+
+$("erase").addEventListener("click", () => setErasing(!erasing));
+
+/* Box or circle. Only changes what the NEXT drag makes — an existing shape
+   is left alone, so tapping the wrong one doesn't wipe out your cut. */
+$("shapeRect").addEventListener("click", () => {
+  keepShape = "rect";
+  $("shapeRect").classList.add("on");
+  $("shapeCircle").classList.remove("on");
+});
+$("shapeCircle").addEventListener("click", () => {
+  keepShape = "circle";
+  $("shapeCircle").classList.add("on");
+  $("shapeRect").classList.remove("on");
+});
+
+/* Clearing the shape puts every stud back, since isErased() says no to
+   everything once there's no region to be outside of. */
+$("unerase").addEventListener("click", () => {
+  keepRegion = null;
+  $("unerase").hidden = true;
+  render();
+});
+
+$("again").addEventListener("click", () => {
+  fileEl.value = "";                                // so re-picking the same file still fires
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+$("save").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.download = "lego-pic-" + gridW + ".png";
+  a.href = outEl.toDataURL("image/png");
+  a.click();
+});
+</script>
+</body>
+</html>
